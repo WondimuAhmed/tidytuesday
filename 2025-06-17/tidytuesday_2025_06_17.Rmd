@@ -1,0 +1,236 @@
+---
+title: "tidytuesday_2025_06_17"
+output: html_document
+date: "2025-06-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# API Specs
+
+This week we're exploring Web APIs! The lead volunteer for TidyTuesday, Jon Harmon, is developing a book and a suite of R packages around Web API usage. To support this work, Jon curated a dataset from [APIs.guru](https://apis.guru), a project that aims to build a machine-readable Wikipedia for Web APIs using the OpenAPI Specification.
+Thank you to Jon Harmon and the Data Science Learning Community for curating this week's dataset.
+
+
+While there are many interesting angles to explore in this data, I chose to focus on a question posed by the Posit team:
+
+Which providers offer the most unique APIs according to APIs.guru — and what categories do those APIs fall into?
+
+This question uncovers not just the size of each provider’s API portfolio, but also the functional diversity of their offerings across domains like cloud, media, telecom, and beyond
+
+
+
+
+# Load Libraries
+```{r load_libraries, echo=FALSE, include=FALSE}
+library(pacman)
+pacman::p_load(tidyverse, tidytext, janitor, tidytuesdayR, scales)
+```
+
+# Load Data
+```{r load_data , echo=FALSE, include=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-06-17')
+
+api_categories <- tuesdata$api_categories
+api_info <- tuesdata$api_info
+api_logos <- tuesdata$api_logos
+api_origins <- tuesdata$api_origins
+apisguru_apis <- tuesdata$apisguru_apis
+```
+
+# Initial Glimpse
+```{r glimpse_data , echo=FALSE, include=FALSE}
+# Preview the structure of two main datasets.
+head(api_categories)
+head(api_info)
+names(api_info)
+names(api_categories)
+```
+
+# Compare Dataset Dimensions
+```{r compare_dimensions , echo=FALSE, include=FALSE}
+# Comparing the number of rows and columns in api_info and api_categories to assess alignment before joining
+
+dim_comparison <- data.frame(
+  DataFrame = c("api_info", "api_categories"),
+  Rows = c(nrow(api_info), nrow(api_categories)),
+  Columns = c(ncol(api_info), ncol(api_categories))
+)
+dim_comparison
+```
+
+# Identify Unmatched API Names
+```{r unmatched_names , echo=FALSE, include=FALSE}
+# Explore mismatched 'name' entries to understand missing joins between datasets
+
+missing_categories <- anti_join(api_info, api_categories, by = "name")
+missing_info <- anti_join(api_categories, api_info, by = "name")
+
+nrow(missing_categories) # 188 
+head(missing_categories)
+nrow(missing_info) # none  to show
+head(missing_info) 
+```
+
+# Unique Provider Count & Top 10% Contribution
+```{r provider_distribution,  echo=FALSE, include=FALSE}
+# Quantify the number of unique providers and the API contribution of the top 10% using api_info data
+
+api_info %>%
+  summarise(unique_providers = n_distinct(provider_name)) # 676 unique providers, nrow(api_info) = 2529
+
+provider_counts <- api_info %>%
+  count(provider_name, name = "num_apis") %>%
+  arrange(desc(num_apis))
+
+top_10_percent <- ceiling(nrow(provider_counts) * 0.10)
+
+top_10_providers <- provider_counts %>%
+  slice_head(n = top_10_percent)
+
+total_apis <- sum(provider_counts$num_apis)
+top_10_apis <- sum(top_10_providers$num_apis)
+share_top_10_providers <- (top_10_apis / total_apis) * 100
+
+cat("Top 10% providers contribute", round(share_top_10_providers, 2), "% of all APIs.\n")
+```
+
+
+
+# Top 10 Providers by API Count after Joining with Category Data 
+```{r top_10_providers, echo=FALSE, include=FALSE}
+# Identify the top 10 providers by total APIs offered
+
+top_10_providers <- api_info %>%
+  count(provider_name, name = "num_apis") %>%
+  arrange(desc(num_apis)) %>%
+  slice_max(n = 10, order_by =num_apis, with_ties=FALSE) #  Two providers tied with the 10th in API count but were excluded to maintain a clear top 10
+
+total_apis <- api_info %>% nrow()
+top_10_total <- sum(top_10_providers$num_apis)
+top_10_api_share <- top_10_total / total_apis * 100
+
+cat("Top 10 providers contribute", round(top_10_api_share, 2), "% of all APIs.\n")
+```
+
+
+
+
+# Join and Analyze by Category
+```{r join_category_data , echo=FALSE, include=FALSE}
+# Merge category data and analyze API counts by provider and category
+
+api_info_cat <- left_join(api_info, api_categories, by = "name")
+
+duplicates <- api_info_cat %>%
+  count(name) %>%
+  filter(n > 1) %>%
+  arrange(desc(n))
+
+head(duplicates)
+dim(duplicates)
+table(duplicates$n)
+
+# Top 10 providers by unique API count
+
+top_10_providers2 <- api_info_cat %>%
+  group_by(provider_name) %>%
+  summarise(total_apis = n_distinct(name), .groups = "drop") %>%
+  slice_max(total_apis, n = 10,  with_ties = FALSE)
+
+# Count APIs by category for these top providers
+
+top_10_provider_cats <- api_info_cat %>%
+  filter(provider_name %in% top_10_providers2$provider_name) %>%
+  group_by(provider_name, apisguru_category) %>%
+  summarise(num_apis = n_distinct(name), .groups = "drop") %>%
+  arrange(desc(num_apis))
+```
+
+# Format Category Labels
+```{r format_labels, echo=FALSE, include=FALSE}
+# Clean and format provider/category names for presentation
+top_10_provider_cats <- top_10_provider_cats %>%
+  mutate(
+    provider_name = str_to_title(provider_name),
+    apisguru_category = case_when(
+      is.na(apisguru_category) ~ NA_character_,
+      TRUE ~ str_to_title(str_replace_all(apisguru_category, "_", " "))
+    )
+  )
+```
+
+# Plot: Stacked Bar by Provider and Category
+```{r plot_stacked_bar , echo=FALSE,}
+
+ggplot(top_10_provider_cats, aes(x = reorder(provider_name, -num_apis), y = num_apis, fill = apisguru_category)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "API Count by Category for Top 10 Providers",
+    x = "Provider",
+    y = "Number of APIs",
+    fill = "API Category"
+  ) +
+  theme_minimal(base_family = "mono") +.   # Experimenting with font family
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(face = "bold")
+  )
+```
+
+# Final Formatting and Plot
+```{r plot_stacked_bar_final, echo=FALSE}
+
+# Ensure clean category names and reorder for plot. The x-axis labels link to the api providers
+
+top_10_provider_cats <- top_10_provider_cats %>%
+  mutate(
+    apisguru_category = ifelse(apisguru_category == "Na", NA, apisguru_category),
+    provider_name = str_to_title(provider_name),
+    apisguru_category = case_when(
+      is.na(apisguru_category) ~ NA_character_,
+      TRUE ~ str_to_title(str_replace_all(apisguru_category, "_", " "))
+    )
+  ) %>%
+  group_by(provider_name) %>%
+  mutate(total_apis = sum(num_apis)) %>%
+  ungroup() %>%
+  mutate(provider_name = fct_reorder(provider_name, total_apis, .desc = TRUE)
+  )
+
+# Render final plot
+
+final_plot <- ggplot(top_10_provider_cats, aes(x = provider_name, y = num_apis, fill = apisguru_category)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Most of the Web’s APIs Come from Just 10 Providers ",
+     subtitle = "Top 10 providers account for 62% of all APIs listed by APIs.guru (2025)",
+    x = "Provider",
+    y = "Number of APIs",
+    fill = "API Category"
+  ) +
+    scale_y_continuous(breaks = seq(0, max(top_10_provider_cats$num_apis), by = 100)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, face = "bold.italic", hjust = 0.5),
+    legend.title = element_text(face = "bold")
+  )
+
+
+ggsave("Top_10_apis_by_category.png", final_plot, width = 10, height = 6, bg="white")
+```
+
+
+
+
+# Summary
+
+This week's analysis of API specifications from APIs.guru revealed a highly skewed distribution in API contributions. A small number of providers—most notably Google, AWS, Azure, and Twilio—account for the majority of listed APIs. Categories spanned cloud services, messaging, payments, and government open data. A small percentage of APIs lacked category metadata,perhaps signaling potential data quality issues. 
