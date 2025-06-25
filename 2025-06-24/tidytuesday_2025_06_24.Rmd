@@ -1,0 +1,299 @@
+---
+title: "tidytuesday_2025_06_24"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-06-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+# Measles cases across the world
+
+This week we are exploring measles and rubella cases across the world. This data was downloaded from the World Health Organisation Provisional monthly measles and rubella data on 2025-06-12.
+
+Please note that all data contained within is provisional. The number of cases of measles and rubella officially reported by a WHO Member State is only available by July of each year (through the joint WHO UNICEF annual data collection exercise). If any numbers from this provisional data are quoted, they should be properly sourced with a date (i.e. "provisional data based on monthly data reported to WHO (Geneva) as of June 2025"). For official data from 1980, please visit our website: https://immunizationdata.who.int/global/wiise-detail-page/measles-reported-cases-and-incidence
+The measles outbreak in the USA has been the subject of much media coverage in the past few months, however, measles continues to be a threat across the world
+
+  How have global measles cases changed over time?
+  Which regions or countries consistently report the highest measles burden?
+  Are there seasonal patterns in measles outbreaks across different regions?
+  Does the ratio of laboratory-confirmed cases to total cases reveal differences in healthcare capacity across countries?
+  Thank you to Jen Richmond (R-Ladies Sydney) for curating this week's dataset.
+  
+## I wanted to focus on the question: "Are there seasonal patterns in measles outbreaks across different regions?"
+
+
+
+# Load Libraries
+```{r load_libraries, echo=FALSE, include=FALSE}
+library(pacman)
+pacman::p_load(tidyverse,tidytuesdayR, scales, forecast)
+```
+
+# Load Data
+```{r load_data , echo=FALSE, include=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-06-24')
+
+cases_month <- tuesdata$cases_month
+cases_year <- tuesdata$cases_year
+```
+
+
+
+# Initial Glimpse
+```{r glimpse_data , echo=FALSE, include=FALSE}
+# Preview the structure of two main datasets.
+head(cases_month)
+head(cases_year)
+names(cases_month)
+names(cases_year)
+```
+
+
+
+# Prep data  
+```{r prepare_plot_data, echo=FALSE,include=FALSE}
+measles_data <- cases_month %>%
+   select(region,country,month, year, measles_total)
+
+# calculate total cases per month for each region
+regional_summary <- measles_data %>%
+   mutate(date = make_date(year = year, month = month, day = 1),
+          Region = recode(region,
+                         "AFR" = "Africa",
+                         "AMR" = "Americas",
+                         "EMR" = "Eastern Mediterranean",
+                         "EUR" = "Europe",
+                         "SEAR" = "South-East Asia",
+                         "WPR" = "Western Pacific")) %>%
+  group_by(Region,year, date) %>%
+  summarise(total_cases = sum(measles_total, na.rm = TRUE), .groups = "drop")
+
+
+```
+
+
+
+# Time series trend plot 
+```{r time_series_plot, echo=FALSE}
+
+ts_plot <- ggplot(regional_summary, aes(x = date, y = total_cases, color = Region)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Trends in Monthly Reported Measles Cases by WHO Region (2012–2025)",
+    x = "Year",
+    y = "Monthly Measles Cases",
+    color = "Region",
+    caption = "Data source: WHO:Provisional Measles and Rubella Data"
+  ) +
+  scale_x_date( 
+    date_breaks = "1 year",
+    date_labels = "%Y", 
+       limits = c(as.Date("2012-01-01"), as.Date("2025-12-31")),
+     expand = c(0, 0) ) +
+  scale_y_continuous(labels = comma_format()) +  # Adds commas to y-axis labels
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "bold"),           # Bold y-axis labels
+    axis.title.x = element_text(face = "bold", size = 12),
+    axis.title.y = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.title = element_text(face = "bold"),
+    plot.caption = element_text(size = 9, hjust = 0)
+  ) + 
+  annotate("text", 
+           x = as.Date("2019-01-01"), 
+           y = 70500, 
+           label = "Major Outbreak in Africa (2019)\n Madagascar Accounted for 73.6% of Reported Cases", 
+           color = "black", 
+           angle = 0, 
+           vjust = -1.5, 
+           hjust = -.05, 
+           fontface = "bold", 
+           size = 3.5)
+
+ts_plot 
+
+ 
+ggsave("Measles_Trends_Final.png", ts_plot, width = 10, height = 6, bg="white")
+
+#In 2019 Africa experienced a significant surge in measles cases, Madagascar was particularly hard-hit
+
+total_africa2019<- regional_summary %>% 
+  group_by(Region,year) %>%
+  summarise(regional_cases_sum = sum(total_cases, na.rm = TRUE)) %>%
+  filter(year=="2019", Region=="Africa") 
+# Mag
+table_africa<- measles_data %>% 
+  filter(region=="AFR")%>%
+ group_by(country,year) %>%
+  summarise(total_cases = sum(measles_total, na.rm = TRUE)) %>%
+  arrange(-total_cases) %>%
+  filter(year=="2019")
+
+
+```
+
+
+
+
+
+```{r stl_decompose_each_region,echo=FALSE }
+
+regions <- unique(regional_summary$Region)
+
+for (r in regions) {
+  cat("\nRegion:", r, "\n")
+  
+
+  # Create ts object (monthly data)
+region_ts <- ts(
+  data = regional_summary$total_cases,
+  start = c(year(min(regional_summary$date)), month(min(regional_summary$date))),
+  frequency = 12
+)
+  # STL decomposition
+  region_stl <- stl(region_ts, s.window = "periodic")
+
+  # Plot decomposition
+  autoplot(region_stl) + ggtitle(paste("STL Decomposition –", r))
+}
+```
+
+```{r seasonal_plot_across_regions, echo=FALSE}
+for (r in unique(regional_summary$Region)) {
+  region_df <- regional_summary %>%
+    filter(Region == r) %>%
+    arrange(date)
+
+  region_ts <- ts(
+    data = region_df$total_cases,
+    start = c(year(min(region_df$date)), month(min(region_df$date))),
+    frequency = 12
+  )
+
+  print(ggseasonplot(region_ts, year.labels = TRUE) +
+        ggtitle(paste("Seasonal Pattern of Measles –", r)))
+}
+
+```
+
+# Seasonality strength test across regions
+
+```{r seasonality_strength_function, echo=FALSE}
+seasonality_strength <- function(ts_obj) {
+  stl_obj <- stl(ts_obj, s.window = "periodic")
+  s <- stl_obj$time.series[, "seasonal"]
+  r <- stl_obj$time.series[, "remainder"]
+  var(s) / (var(s) + var(r))
+}
+```
+
+```{r seasonality_strength_test_across_regions, echo=FALSE}
+
+Africa_df <- regional_summary %>%
+    filter(Region == "Africa") %>%
+    arrange(date)
+
+Africa_ts <- ts(
+ Africa_df$total_cases,
+  start = c(year(min(Africa_df$date)), month(min(Africa_df$date))),
+  frequency = 12
+)
+
+
+Western_Pacific_df <- regional_summary %>%
+    filter(Region == "Western Pacific") %>%
+    arrange(date)
+Western_Pacific_ts <- ts(
+ Western_Pacific_df$total_cases,
+  start = c(year(min(Western_Pacific_df$date)), month(min(Western_Pacific_df$date))),
+  frequency = 12
+)
+
+
+Europe_df <- regional_summary %>%
+    filter(Region == "Europe") %>%
+    arrange(date)
+Europe_ts <- ts(
+ Europe_df$total_cases,
+  start = c(year(min(Europe_df$date)), month(min(Europe_df$date))),
+  frequency = 12
+)
+
+
+ South_East_Asia_df <- regional_summary %>%
+    filter(Region == "South-East Asia") %>%
+    arrange(date)
+
+South_East_Asia_ts <- ts(
+  South_East_Asia_df$total_cases,
+  start = c(year(min(South_East_Asia_df$date)), month(min(South_East_Asia_df$date))),
+  frequency = 12
+)
+
+Americas_df <- regional_summary %>%
+    filter(Region == "Americas") %>%
+    arrange(date)
+Americas_ts <- ts(
+ Americas_df$total_cases,
+  start = c(year(min(Americas_df$date)), month(min(Americas_df$date))),
+  frequency = 12
+)
+
+Eastern_Mediterranean_df <- regional_summary %>%
+    filter(Region == "Eastern Mediterranean") %>%
+    arrange(date)
+Eastern_Mediterranean_ts <- ts(
+ Eastern_Mediterranean_df$total_cases,
+  start = c(year(min(Eastern_Mediterranean_df$date)), month(min(Eastern_Mediterranean_df$date))),
+  frequency = 12
+)
+
+# Print seasonality strengths
+cat("Africa: ", round(seasonality_strength(Africa_ts), 3), "\n")
+cat("Americas: ", round(seasonality_strength(Americas_ts), 3), "\n")
+cat("Europe: ", round(seasonality_strength(Europe_ts), 3), "\n")
+cat("South-East Asia: ", round(seasonality_strength(South_East_Asia_ts), 3), "\n")
+cat("Western Pacific: ", round(seasonality_strength(Western_Pacific_ts), 3), "\n")
+cat("Eastern Mediterranean: ", round(seasonality_strength(Eastern_Mediterranean_ts), 3), "\n")
+```
+
+
+
+
+
+```{r proportion_globa_cases_region, echo=FALSE}
+
+ggplot(regional_summary, aes(x = date, y = total_cases, fill = Region)) +
+  geom_area(position = "fill") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Proportion of Global Measles Cases by Region",
+    x = "Date", y = "Proportion of Cases",
+    fill = "Region"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+# Summary
+
+This analysis focused on answering the question:  
+**Are there seasonal patterns in measles outbreaks across different WHO regions?**
+
+What have we learned? 
+- Africa experienced a major outbreak in 2019**, with 289,766 reported cases. Remarkably, Madagascar alone contributed 213,291 cases, accounting for ~73.6% of the regional total that year.
+- Africa and South-East Asia exhibited moderate seasonality, with consistent peaks in measles cases in the first quarter of each year.
+- Europe, the Americas, the Eastern Mediterranean showed weaker or more irregular seasonal patterns.
+- The Western Pacific region showed a mild seasonal structure, with occasional peaks but less consistency over the years.
