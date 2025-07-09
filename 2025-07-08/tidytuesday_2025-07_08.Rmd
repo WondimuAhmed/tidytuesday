@@ -1,0 +1,232 @@
+---
+title: "tidytuesday_2025_07_07"
+output: html_document
+date: "2025-07-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#The xkcd Color Survey Results
+
+In 2010, the xkcd Color Survey asked hundreds of thousands of people to name colors they saw, revealing the different ways in which people perceive and label colors.
+
+Color is a really fascinating topic, especially since we’re taught so many different and often contradictory ideas about rainbows, different primary colors, and frequencies of light.
+
+Which types of users were most accurate in naming colors?
+Which colors are mentioned most in the top 100 ranked color names?
+Which types of users are least likely to be spam users?
+Thank you to Nicola Rennie for curating this week's dataset.
+
+
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load(
+  tidyverse, tidytuesdayR, scales,, DataExplorer, gganimate, gifski, effectsize
+)
+```
+
+# Import Data
+```{r load_data}
+tuesdata <- tt_load('2025-07-08')
+users <- tuesdata$users
+answers <- tuesdata$answers
+color_ranks <- tuesdata$color_ranks
+
+
+```
+
+# Explore data 
+
+## Users data
+The 'users' dataset consists of 152,401 users. 
+Monitor type: most users reported using LCDs. 
+Y chromosome presence was reported by 71% of respondents suggesting a majority male (chromosomal) sample.
+Colorblindness was reported by only 4% of users, I think this is consistent with expected population rates.
+The spam probability variable has a mean of 0.22, but a maximum value of 8.43.  Since probabilities must lie within [0, 1]. Thus,  
+I treated spam_prob > 0.5 as an indicator of unreliable or suspicious user data and excluded those rows from further analysis (see next section).
+
+```{r describe_users_data, echo=FALSE}
+describe(users)
+```
+
+## answers data 
+Total Responses: 1,058,211
+Id Range: 1 to 152,401 users indicating number of respondents 
+Color Hex Codes (hex): Stored as integers internally, but represent hexadecimal color values.
+Rank: Reflects how well a user matched their response to the top 5 ranked names for a given color. Range: 1 (most accurate) to 5 (least aligned with consensus)
+
+```{r describe_answers_data, echo=FALSE}
+describe(answers)
+```
+## color_ranks
+This dataset contains the 949 most commonly named colors from the xkcd color survey.
+Total Colors: 949, color, rank, and hex
+Rank: Range: 1 (most frequently used color name) to 949 (least frequent).
+
+```{r describe_ranks_data, echo=FALSE}
+describe(color_ranks)
+```
+
+
+# Data Cleaning 
+
+## Data Integration
+I  merged user response data with demographic information using user_id.
+
+##Missing Data Removal
+I filtered out all rows with missing values for either y_chromosome or colorblind
+
+#Spam Filtering
+ I excluded users with a spam_prob greater than 0.5. This threshold was used to remove respondents likely to have submitted unreliable or non-serious data.
+ 
+## User-Level Aggregation
+I then grouped the cleaned data by user, y_chromosome, and colorblind status to summarize each user's response accuracy.
+Next, I calculated the average rank of the responses provided by each user.
+Derived an accuracy score by I took  the inverse of the mean rank to derive accuracy score. This helps in ensuring  that lower ranks (more accurate naming) yielded higher scores.
+For further filtering for reliability, I counted the total number of valid responses (total_answers) per user.
+
+```{r data_cleaning, echo=FALSE}
+
+user_accuracy_data <- answers %>%
+  left_join(users, by = "user_id") %>%
+  filter(!is.na(y_chromosome), !is.na(colorblind),spam_prob <= 0.5) %>%
+  group_by(user_id, y_chromosome, colorblind) %>%
+  summarise(
+    mean_rank = mean(rank, na.rm = TRUE),
+    accuracy_score = 1 / mean_rank, 
+    user_total_responses = n(),
+    .groups = "drop"
+  ) 
+describe(user_accuracy_data)
+```
+* Users answered a median of 5 questions and an average of 8.3. To ensure meaningful accuracy estimates, I removed users with fewer than 5 responses. This helps in reducing noise and improving the reliability of per-user accuracy scores. Having a sufficient number of observations is important
+
+```{r further_data_cleaning, echo=FALSE}
+user_accuracy_data<- user_accuracy_data %>%
+  filter(user_total_responses >= 5)  
+```
+
+
+
+
+```{r reate-user-groups-sex-vision, echo=FALSE}
+user_accuracy_data <- user_accuracy_data  %>%
+  mutate(
+    sex = ifelse(y_chromosome == 1, "Male", "Female"),
+    vision = ifelse(colorblind == 1, "Colorblind", "Normal Vision"),
+    user_group = paste(sex, vision, sep = ".")
+  )
+
+```
+
+```{r anova-user-group-accuracy, echo=FALSE}
+my_anova_model <- aov(accuracy_score ~ user_group, data = user_accuracy_data)
+summary(anova_model)
+
+```
+
+```{r tukey-posthoc-user-group, echo=FALSE}
+ TukeyHSD(my_anova_model)
+```
+
+
+```{r summarize-user-group-accuracy, echo=FALSE}
+  group_means <- user_accuracy_data %>%
+  group_by(user_group) %>%
+  summarise(
+    mean_accuracy = mean(accuracy_score),
+    sd_accuracy = sd(accuracy_score),
+    n = n(),
+    se = sd_accuracy / sqrt(n),
+    .groups = "drop"
+  )
+group_means
+```
+```{r t-test_for_sex_vision}
+
+t_sex <- t.test(accuracy_score ~ sex, data = user_accuracy_data)
+d_sex <- cohen.d(accuracy_score ~ sex, data = user_accuracy_data)
+
+t_sex
+d_sex
+
+t_vision <- t.test(accuracy_score ~ vision, data = user_accuracy_data)
+d_vision <- cohen.d(accuracy_score ~ vision, data = user_accuracy_data)
+t_vision
+d_vision
+```
+
+
+```{r compute-mean-lines-sex-vision, echo=FALSE}
+mean_lines <- user_accuracy_data %>%
+  group_by(sex, vision) %>%
+  summarise(mean_acc = mean(accuracy_score, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    label = paste0("Mean: ", round(mean_acc, 3)),
+    y_position = case_when(
+      sex == "Female" ~ 7.5,
+      sex == "Male" ~ 7
+    )
+  )
+
+
+```
+
+
+```{r animated-density-sex-by-vision, echo=FALSE}
+animated_density <- ggplot(user_accuracy_data, aes(x = accuracy_score, fill = sex)) +
+  geom_density(alpha = 0.5, aes(color = sex)) +  # apply both fill and color to sex
+  geom_vline(data = mean_lines, 
+             aes(xintercept = mean_acc, color = sex, group = sex),
+             linetype = "dashed", size = 1) +
+  geom_text(data = mean_lines, 
+            aes(x = mean_acc, y = y_position, label = label, group = sex, color = sex),
+            hjust = -0.1, size = 5) +  # remove show.legend = FALSE
+  scale_fill_manual(values = c("Female" = "red", "Male" = "blue")) +
+  scale_color_manual(values = c("Female" = "red", "Male" = "blue")) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    title = "Distribution of Accuracy Scores — {closest_state}",
+    x = "Accuracy Score",
+    y = "Density",
+    fill = NULL,
+    color = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold"),
+    legend.position = "right"
+  ) +
+  transition_states(vision, transition_length = 2, state_length = 1) +
+  ease_aes("cubic-in-out")
+# View animated plot
+ animate(animated_density, fps = 10, width = 800, height = 800)
+```
+
+
+
+```{r save_animation, echo=FALSE}
+animated_gif <- animate(
+  animated_density,
+  fps = 10,
+  width = 764,                  
+  height = 400,
+  renderer = gifski_renderer()
+)
+anim_save("accuracy_dist_animation.gif", animation = animated_gif)
+
+
+```
+
+
+
+
+
+
