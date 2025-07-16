@@ -1,0 +1,232 @@
+---
+title: "tidytuesday_2025_07_15"
+output: html_document
+date: "2025-07-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# British Library Funding
+
+This week we're looking into British Library funding! Thank you to Andy Jackson for compiling this data (and updating it with more information) and posting it on BlueSky! Also thanks to David Rosenthal's 2017 blog for inspiring Andy's efforts!
+
+I often refer back to this 2017 analysis by DSHR, which documents how the Inflation-Adjusted income of the British Library fell between 1999 and 2016. I referenced it in Invisible Memory Machines, but of course I was missing the data from the last eight years. Perhaps it’s all turned around since then!
+It hadn't all turned around, and he had to jump through some hoops to compile the data. Thanks for the efforts to preserve the data, Andy!
+
+What is the most variable source of data?
+What is the most consistent?
+Does that analysis change when adjusted for inflation?
+See Andy Jackson's Google Sheet (where we got this dataset) for some sample charts.
+
+Thank you to Jon Harmon, Data Science Learning Community for curating this week's dataset.
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load(
+  tidyverse, tidytuesdayR, DataExplorer,tools, ggbump,patchwork
+)
+```
+
+# Import Data
+```{r load_data}
+#tuesdata <- tidytuesdayR::tt_load('2025-07-15') # 401 error, read directly 
+
+bl_funding <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-07-15/bl_funding.csv')
+
+
+```
+
+# Explore data 
+
+```{r describe_users_data, echo=FALSE}
+introduce(bl_funding)
+plot_intro(bl_funding)
+```
+
+```{r Prepare data, echo=FALSE}
+# Select relevant columns and convert to long format
+
+nominal_long <- bl_funding %>%
+  select(
+    year,
+    gia_gbp_millions,
+    voluntary_gbp_millions,
+    investment_gbp_millions,
+    services_gbp_millions,
+    other_gbp_millions
+  ) %>%
+  pivot_longer(-year, names_to = "source", values_to = "amount") %>%
+  mutate(
+    source = gsub("_gbp_millions", "", source),
+    source = toTitleCase(gsub("_", " ", source)),
+    type = "Nominal"
+  )
+
+adjusted_long <- bl_funding %>%
+  select(
+    year,
+    gia_y2000_gbp_millions,
+    voluntary_y2000_gbp_millions,
+    investment_y2000_gbp_millions,
+    services_y2000_gbp_millions,
+    other_y2000_gbp_millions
+  ) %>%
+  pivot_longer(-year, names_to = "source", values_to = "amount") %>%
+  mutate(
+    source = gsub("_y2000_gbp_millions", "", source),
+    source = toTitleCase(gsub("_", " ", source)),
+    type = "Inflation-Adjusted"
+  )
+
+bl_plot_data <- bind_rows(nominal_long, adjusted_long)
+
+bl_plot_data <- bl_plot_data %>%
+  mutate(source = factor(source, levels = c("Gia", "Voluntary", "Investment", "Services", "Other")),
+         type = factor(type, levels = c("Nominal", "Inflation-Adjusted"))
+  )
+
+```
+
+
+```{r faceted-line-plot, echo=FALSE}
+# My custom color palette
+bl_colors <- c(
+  "Gia" = "#E63946",         
+  "Voluntary" = "#F4A261",   
+  "Investment" = "#2A9D8F",  
+  "Services" = "#0000FF",  
+  "Other" = "#000000"        
+)
+
+
+bl_line_plot <- ggplot(bl_plot_data, aes(x = year, y = amount, color = source)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  facet_wrap(~type, scales = "free_y") +
+  scale_color_manual(values = bl_colors) +  
+  labs(
+    title = "British Library Income Sources Over Time",
+    subtitle = "Nominal vs Inflation-Adjusted (Y2000 GBP)",
+    x = "Year", y = "Income (£ Millions)", color = "Source"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold", size = 14),
+    legend.position = "bottom"
+  )
+
+bl_line_plot
+
+```
+
+
+
+```{r Faceted-area-chart, echo=FALSE}
+bl_area_plot <- ggplot(bl_plot_data, aes(x = year, y = amount, fill = source)) +
+  geom_area(alpha = 0.85, color = "white", size = 0.2) +
+  facet_wrap(~type, scales = "free_y") +
+  scale_fill_manual(values = bl_colors) +
+  labs(
+    x = "Year", y = "Funding (£ Millions)", fill = "Source", 
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+      axis.text.y = element_text(size = 10, face = "bold", family = "Arial"),
+      axis.title.y = element_text(size = 12, face = "bold", family = "Arial"),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom",
+  )
+
+bl_area_plot
+```
+
+```{r faceted-bump-chart, echo=FALSE}
+bump_plot_data <- bind_rows(nominal_long, adjusted_long) %>%
+  mutate(
+    source = gsub("_gbp_millions|_y2000", "", source),
+    source = toTitleCase(gsub("_", " ", source))
+  ) %>%
+  group_by(year, type) %>%
+  mutate(rank = rank(-amount, ties.method = "min")) %>%
+  ungroup()
+
+bump_plot_data <- bump_plot_data %>%
+  mutate(source = factor(source, levels = c("Gia", "Voluntary", "Investment", "Services", "Other")),
+         type = factor(type, levels = c("Nominal", "Inflation-Adjusted"))
+  )
+
+
+bl_bump_plot <- ggplot(bump_plot_data, aes(x = year, y = rank, color = source)) +
+  geom_bump(size = 2, smooth = 10) +
+  geom_point(size = 3, shape = 21, fill = "white", stroke = 1.2) +
+  scale_color_manual(values = bl_colors) +
+  scale_y_reverse(breaks = 1:5) +
+  facet_wrap(~type) +
+  labs(
+    x = "Year", y = "Rank (Lower is Better)",
+    color = "Income Source"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 10, face = "bold", family = "Arial"),
+    axis.title.y = element_text(size = 12, face = "bold", family = "Arial"),
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 13, face = "bold", hjust = 0.5,lineheight = 1.2),
+    legend.position = "",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+bl_bump_plot
+```
+
+
+
+
+```{r bl_final_faceted_plot, echo=FALSE}
+
+bl_final_faceted_plot <- bl_bump_plot / bl_area_plot +
+  plot_layout(ncol = 1, heights = c(1, 1)) +
+  plot_annotation(
+    title = "British Library Funding Sources",
+    subtitle = "Grant-in-Aid is the most consistent funding source — even after adjusting for inflation \n Voluntary and investment source rankings fluctuate widely year to year ",
+    caption = "Note: Rank 1 = Funding source with the highest amount in a given year  \n
+      Data source: anjackson.net", 
+    theme = theme(
+      plot.title = element_text(face = "bold", size = 20, hjust = 0.5,),
+      plot.subtitle = element_text(size = 14, hjust = 0.5, lineheight = 1,face = "bold"),
+      plot.caption = element_text(size = 10, hjust = 1, face = "italic")
+    )
+  )
+
+# Show combined plot
+bl_final_faceted_plot
+
+ggsave(
+    plot = bl_final_faceted_plot, filename = "bl_funding.png",
+    width = 10, height = 10, units = "in", dpi = 600
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
