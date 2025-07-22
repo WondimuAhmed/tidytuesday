@@ -1,0 +1,331 @@
+---
+title: "tidytuesday_2025_07_22"
+output: html_document
+date: "2025-07-22"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#MTA Permanent Art Catalog
+This week we're exploring the (New York) MTA Permanent Art Catalog! 
+The dataset  documents hundreds of artistic installations in subway and commuter rail stations across the city. Each record includes rich details: the artist's name, artwork title, year of installation, materials used, and a narrative description of the artwork itself.
+
+Public art often reflects the culture, identity, and emotion of a place. I wanted to go beyond cataloging facts and explore how these artworks make people feel.
+
+# I wanted to focus on sentiment analysis in the art description 
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load(
+  tidyverse, tidytuesdayR, DataExplorer, patchwork, tidytext,reshape2, ggwordcloud, wordcloud,textdata)
+
+
+```
+
+# Import Data
+```{r load_data, echo=FALSE}
+tuesdata <- tidytuesdayR::tt_load('2025-07-22')
+mta_art <- tuesdata$mta_art
+station_lines <- tuesdata$station_lines
+```
+
+
+
+# Explore data 
+```{r describe_mta_stationlines_data, echo=FALSE}
+introduce(mta_art)
+introduce(station_lines)
+
+plot_intro (mta_art)
+plot_intro(station_lines)
+head(mta_art)
+head(station_lines)
+
+```
+
+
+
+```{r count_art_by_agency, echo=FALSE}
+#Which agency has the most art? Which has the least?
+mta_art %>%
+  count(agency, sort = TRUE)
+
+```
+
+
+# Preprocess Data 
+```{r create_uniqueID and tokenize, echo=FALSE}
+
+mta_art <- mta_art %>%
+  mutate(id = row_number())
+
+art_des <- mta_art %>%
+  select(id, art_description) %>%
+  unnest_tokens(word, art_description) %>%
+  anti_join(stop_words, by = "word")
+dim(mta_art)
+```
+
+
+```{r use_bing_lexicon_to_get_sentiment_label, echo=FALSE}
+
+bing_sentiments <- get_sentiments("bing")
+
+art_sentiments <- art_des %>%
+  inner_join(bing_sentiments, by = "word")
+
+# Positive to negative ratio
+overall_counts <- art_sentiments %>%
+  count(sentiment)
+
+overall_counts 
+positive_total <- overall_counts %>% filter(sentiment == "positive") %>% pull(n)
+negative_total <- overall_counts %>% filter(sentiment == "negative") %>% pull(n)
+
+overall_ratio <- positive_total / negative_total
+overall_ratio
+
+```
+
+
+```{r count_+ve_-ve words_basedon_bing, echo=FALSE}
+
+sentiment_summary <- art_sentiments %>%
+  count(id, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(net_sentiment = positive - negative)
+
+art_data_sentiment <- mta_art %>%
+  left_join(sentiment_summary, by = "id") %>%
+  mutate(net_sentiment = replace_na(net_sentiment, 0))
+
+```
+
+```{r plot_sentiment_overtime, echo=FALSE}
+mta_art_plo1 <- art_data_sentiment %>%
+  ggplot(aes(x = art_date, y = net_sentiment)) +
+  geom_point(aes(color = net_sentiment > 0), size = 2, alpha = 0.7) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkblue") +
+  labs(title = "Sentiment of MTA Art Descriptions Over Time",
+       x = "Year", y = "Net Sentiment Score") +
+  theme_minimal()
+mta_art_plo1
+```
+
+
+## The positive sentiment vocabulary in MTA art descriptions is largely centered on visual appeal, creativity, and scale. The negative sentiment words often include conceptual or physical terms that may not be “negative” in context (e.g., “rail” or “complex”), but are tagged as such by the lexicon.
+
+
+```{r most_common_sentiment_words, echo=FALSE}
+mta_art_plo2 <-art_sentiments %>%
+  count(word, sentiment, sort = TRUE) %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = word, y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ sentiment, scales = "free_y") +
+  coord_flip() +
+  labs(title = "Most Frequently Used Positive and Negative Words in Public Art Descriptions",
+       x = NULL, y = "Count")
+mta_art_plo2
+```
+
+
+```{r create_comparison_wordcloud_using_baseR, echo=FALSE}
+
+word_counts <- art_sentiments %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0)
+
+comparison.cloud(word_counts,
+                 colors = c("red", "green"),
+                 max.words = 50,
+                 title.size = 1.5)
+
+
+```
+
+
+
+## Extract Bigrams
+Lets' extract bigrams to get a sense of semantic context around misclassified sentiment words: "rail", "complex", "stainless"
+
+```{r bigram_extraction, echo=FALSE}
+
+bigrams <- mta_art %>%
+  mutate(id = row_number()) %>%
+  select(id, art_description) %>%
+  unnest_tokens(bigram, art_description, token = "ngrams", n = 2)
+
+
+bigram_separated <- bigrams %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word)
+
+# Check how 'rail' 'complex' and stainless are used
+rail_complex_stainless <-bigram_separated %>%
+  filter(word1 == "rail" | word2 == "rail" |word1 == "stainless" | word2 == "stainless" |
+         word1 == "complex" | word2 == "complex") %>%
+  unite(bigram, word1, word2, sep = " ") %>%
+  count(bigram, sort = TRUE)
+rail_complex_stainless
+
+```
+
+## Bigram Results 
+The word "complex" is used in spatial or artistic ways. Its negative classification is questionable in this domain The word "rail" is being misclassified as negative by the Bing lexicon.It appears in non-emotional and infrastructural contexts. Stainless most appears as a material descriptor (e.g., “stainless steel”) and not an emotional term.So I excluded these terms from  from sentiment scoring.
+
+
+```{r ignorewords_and rerun, echo=FALSE}
+ignore_words <- c("rail", "complex", "stainless")
+art_sentiments <- art_sentiments %>%
+  filter(!word %in% ignore_words)
+
+word_counts <- art_sentiments %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0)
+
+sentiment_summary <- art_sentiments %>%
+  count(id, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(net_sentiment = positive - negative)
+
+art_data_sentiment <- mta_art %>%
+  left_join(sentiment_summary, by = "id") %>%
+  mutate(net_sentiment = replace_na(net_sentiment, 0))
+
+
+```
+# Create final plot
+```{r plot1, echo=FALSE}
+
+plot1 <- art_data_sentiment %>%
+  ggplot(aes(x = art_date, y = net_sentiment)) +
+  geom_point(aes(color = net_sentiment > 0), size = 2, alpha = 0.7) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkblue") +
+  scale_color_manual(
+    values = c("TRUE" = "darkgreen", "FALSE" = "red"),
+    labels = c("FALSE" = "Negative", "TRUE" = "Positive"),
+    name = "Sentiment"
+  ) +
+  labs(
+    title = "Sentiment analysis of 381 artwork descriptions \n reveals a steady rise in positive tone since 1980",
+    x = "Year", y = "Net Sentiment Score"
+  ) +
+ theme(
+    axis.title.x = element_text(size = 10, face = "bold", family = "Arial"),
+    axis.text.y = element_text(size = 10, face = "bold", family = "Arial"),
+    axis.title.y = element_text(size = 10, face = "bold", family = "Arial"),
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    axis.text.x = element_text(size = 10, face = "bold", family = "Arial", hjust = 1)
+  )
+plot1
+
+
+
+
+
+```
+
+
+```{r plot2, echo=FALSE}
+
+plot2 <- art_sentiments %>%
+  count(word, sentiment, sort = TRUE) %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(
+    word = reorder(word, n),
+    sentiment = factor(sentiment, levels = c("positive", "negative"), labels = c("Positive", "Negative"))
+  ) %>%
+  ggplot(aes(x = word, y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values = c("Positive" = "darkgreen", "Negative" = "red")) +
+  facet_wrap(~ sentiment, scales = "free_y") +
+  coord_flip() +
+  labs(title = "",
+       x = NULL, y = "Count") + 
+  theme(
+    axis.title.x = element_text(size = 10, face = "bold", family = "Arial"),
+    axis.text.y = element_text(size = 10, face = "bold", family = "Arial"),
+    axis.title.y = element_text(size = 10, face = "bold", family = "Arial"),
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    axis.text.x = element_text(size = 10, face = "bold", family = "Arial", hjust = 1), 
+    panel.grid = element_blank()
+  )
+
+plot2
+
+
+```
+
+```{r reshape_data_and_plot_top30_wordcloud_using_ggcloud, echo=FALSE}
+
+
+word_counts_long <- word_counts %>%
+  as_tibble(rownames = "word") %>%
+  pivot_longer(cols = c("positive", "negative"),
+               names_to = "sentiment",
+               values_to = "n") %>%
+  filter(n > 0)  
+
+top30_words <- word_counts_long %>%
+  group_by(sentiment) %>%
+  slice_max(order_by = n, n = 30) %>%
+  ungroup()
+
+
+plot3 <- ggplot(top30_words, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = sentiment)) +
+  scale_size_area(max_size = 30) +
+  facet_wrap(~ sentiment) +
+  scale_color_manual(values = c("positive" = "darkgreen", "negative" = "red")) +
+  theme_minimal() +
+  labs(title = "Top 30 Positive and Negative Words") +
+ theme(
+  plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
+  )
+plot3
+```
+
+```{r final_plot, echo=FALSE}
+
+mta_sentiment_plot <- plot2 / plot1 +
+  plot_layout(heights = c(1, 1.2)) +
+  plot_annotation(
+  title = "New York’s Metropolitan Transportation Authority  (MTA) Public Art Sentiment",
+  subtitle = "Artwork descriptions are mostly positive.\n Positive sentiment words outnumber negative ones nearly 4 to 1   ",
+  caption = "Data source: MTA Arts & Design Permanent Art Catalog. Sentiment scored using the Bing lexicon with the tidytext package.",
+  theme = theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 14,face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0), 
+    plot.background = element_rect(color = "gold", fill = NA, linewidth = 6), 
+     plot.margin = margin(t = 20, r = 10, b = 10, l = 10)))
+
+
+mta_sentiment_plot
+
+ggsave(
+  plot = mta_sentiment_plot, filename = "mta_sentiment_plot.png",
+  width = 10, height = 10, units = "in", dpi = 600
+)
+
+ 
+
+
+```
+
+# Key Insights
+
+- The language used in MTA art descriptions is generally positive, with an upward trend over time.
+- Sentiment-labeled words can reflect literal materials or abstract artistic themes, which means manual filtering and bigram analysis are essential.
+- The dashboard provides a visually compelling narrative that connects public infrastructure, art, and emotional expression through text analytics
