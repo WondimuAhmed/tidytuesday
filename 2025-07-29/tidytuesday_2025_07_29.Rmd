@@ -1,0 +1,160 @@
+---
+title: "tidytuesday_2025_07_29"
+output: html_document
+date: "2025-07-29"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# What have we been watching on Netflix?
+
+This week we are exploring TV show and movie viewing data from Netflix. Since 2023, Netflix has released regular Engagement Reports summarising the number of hours that users have spent watching each show and movie in the last 6 months.
+
+This report, which captures ~99% of all viewing in the first half of 2025, shows that people watched a lot of Netflix — over 95B hours — spanning a wide range of genres and languages. It’s why we continue to invest in a variety of quality titles for various moods and tastes and work hard to make them great.
+The dataset this week combines viewing data from late 2023 through the first half of 2025. For this analysis, I focused on the **most-watched titles from January to June 2025**, comparing the **Top 10 Movies** to the **Top 10 TV Shows** based on global view counts.
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools)
+
+```
+
+# Import the Data
+```{r load_data, echo=FALSE}
+tuesdata <- tidytuesdayR::tt_load('2025-07-29')
+movies <- tuesdata$movies
+shows <- tuesdata$shows
+```
+
+
+
+#Initial Data Exploration
+
+```{r describe_data, echo=FALSE}
+introduce(movies)
+introduce(shows)
+
+plot_intro (movies)
+plot_intro(shows)
+head(movies)
+head(shows)
+
+names(shows)
+names(shows)
+```
+
+
+# Data Preparation
+
+```{r prep_data, echo=FALSE}
+
+movies_data <- movies %>%
+  filter(report == "2025Jan-Jun") %>%
+  arrange(desc(views)) %>%
+  slice_max(views, n = 10) %>%
+  mutate(
+    rank = factor(row_number()),
+    views_in_millions = round(views / 1e6),
+    title = str_remove(title, "//.*"),
+    title = str_trim(title),
+    title= str_to_title(title),
+    title = toTitleCase(title),
+    type = "Movie"
+  )
+
+shows_data <- shows %>%
+  filter(report == "2025Jan-Jun") %>%
+  arrange(desc(views)) %>%
+  slice_max(views, n = 10) %>%
+  mutate(
+    rank = factor(row_number()),
+    views_in_millions = round(views / 1e6),
+    title = str_remove(title, "//.*"),
+    title = str_trim(title),
+    title= str_to_title(title),
+    title = toTitleCase(title),
+    type = "TV Show"
+  )
+
+netflix_data <- bind_rows(shows_data, movies_data) %>%
+  mutate(
+    count = if_else(type == "TV Show", views_in_millions, -views_in_millions),
+    rank = factor(rank, levels = 10:1)  # this is important for reversing 
+  )
+
+tvshow_total <- netflix_data[1:10, ] %>% pull(views_in_millions) %>% sum()
+movie_total  <- netflix_data[11:20, ] %>% pull(views_in_millions) %>% sum()
+difference   <- movie_total - tvshow_total
+
+tvshow_total     # 716
+movie_total      # 898
+difference       # 182
+
+```
+
+
+# Visualizing Top Titles
+```{r plot_}
+netflix_plot <- ggplot(netflix_data, aes(x = count, y = rank, fill = type)) +
+  geom_col(width = 0.8, show.legend = FALSE) +
+
+  geom_text(
+    data = filter(netflix_data, type == "Movie"),
+    aes(label = title),
+    hjust = 1.05, color = "black", size = 4, fontface = "bold", family = "Arial"
+  ) +
+
+  geom_text(
+    data = filter(netflix_data, type == "TV Show"),
+    aes(label = title),
+    hjust = -0.01, color = "black", size = 4, fontface = "bold", family = "Arial"
+  ) +
+
+ scale_fill_manual(values = c("Movie" = "#E50914", "TV Show" = "#141414")) +
+  
+  scale_x_continuous(
+    limits = c(-180, 180),
+    breaks = seq(-180, 180, by = 15),
+    labels = abs
+  ) +
+    
+  labs(
+  title = "Netflix’s Top 10 Most-Watched Movies and TV Shows (Jan–Jun 2025)",
+  subtitle = "Head-to-head by rank: Each row compares the top movie and show based on global view counts",
+  x = "Views in Millions",
+   y = NULL,
+  caption = "Source: Netflix Engagement Report – First Half of 2025. Global view counts reflect total worldwide views where the title was available on Netflix during Jan–Jun 2025.
+'The Secret Life of Pets 2' and 'Despicable Me 4' not globally available."
+)  +
+ theme_minimal(base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    axis.text.y = element_blank(),
+    panel.grid.major.y = element_blank(),   
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.text.x = element_text(size = 12, face = "bold", family = "Arial", hjust = 1),
+    plot.subtitle = element_text(size = 13,face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 10, hjust = 0))
+
+
+netflix_plot 
+
+ggsave(
+  plot = netflix_plot, filename = "netflix_plot.png",
+  width = 10, height = 10, units = "in", dpi = 600
+)
+
+```
+
+
+# Key Insights
+
+- Back in Action and Adolescence were the most-watched titles overall
+- Squid Game remained dominant, with both Season 2 and 3 in the TV top 3.
+- The Secret Life of Pets 2 and Despicable Me 4 landed in the movie Top 10 despite not being globally available.
+- Format Preference: While movies slightly outperformed shows in aggregate views, both formats featured diverse genres and wide appeal.
