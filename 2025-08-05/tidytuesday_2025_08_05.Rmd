@@ -1,0 +1,277 @@
+---
+title: "tidytuesday_2025_08_05"
+output: html_document
+date: "2025-08-05"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Income Inequality Before and After Taxes
+
+This week we're exploring Income Inequality Before and After Taxes, as processed and visualized by Joe Hasell at Our World in Data: "Income inequality before and after taxes: how much do countries redistribute income?"
+
+All data was processed by [Our World in Data]](https://ourworldindata.org), using these sources:
+
+The Gini coefficient measures inequality on a scale from 0 to 1. Higher values indicate higher inequality. Inequality is measured here in terms of income before and after taxes and benefits.
+Which countries have the highest Gini coefficient before taxes?
+Which countries have the highest Gini coefficient after taxes?
+Which countries have the highest shifts in Gini coefficient?
+Which countries have the lowest shifts in Gini coefficient?
+Which countries have had the highest changes in redistribution in the available data?
+Thank you to Jon Harmon, Data Science Learning Community for curating this week's dataset.
+
+
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,openxlsx)
+
+```
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+# Import the #TidyTuesday data for 2025-08-05
+
+tuesdata <- tidytuesdayR::tt_load('2025-08-05')
+income_inequality_processed <- tuesdata$income_inequality_processed
+income_inequality_raw <- tuesdata$income_inequality_raw
+
+# Explore structure and completeness
+introduce(income_inequality_processed)
+introduce(income_inequality_raw)
+plot_intro(income_inequality_processed)
+plot_intro(income_inequality_raw)
+glimpse(income_inequality_processed)
+glimpse(income_inequality_raw)
+
+# After initial exploration, I noticed that the datasets do not include key variables 
+# such as Top 10% or Top 20% income shares, which are essential for the analysis I had in mind.
+# Therefore, I decided to supplement the analysis by loading data directly from the OECD:
+# https://www.oecd.org/content/dam/oecd/en/data/datasets/income-and-wealth-distribution-databases/idd-key-indicators.xlsx
+
+
+```
+
+```{r import_data_oecd, echo=FALSE}
+
+# Import OECD Key Indicators on Income and Wealth Distribution
+# The relevant data starts at row 6, and rows 6–44 include all available country-level observations.
+# Earlier rows contain metadata, and later rows include notes or non-country entries I  don't need.
+# I cleaned the column names for consistency and preview the structure.
+
+oecd_df <- read.xlsx(
+  "https://www.oecd.org/content/dam/oecd/en/data/datasets/income-and-wealth-distribution-databases/idd-key-indicators.xlsx", 
+  sheet = 1, 
+  startRow = 6,
+  rows = 6:44
+) %>%
+  clean_names()
+
+# Preview the structure of the data
+glimpse(oecd_df)
+
+```
+
+
+
+# Data Preparation 
+```{r data_prep, echo=FALSE}
+
+# Select and rename only relevant indicators (e.g., Gini, S80/S20 ratio, top/bottom income shares, poverty rate)
+names(oecd_df)[c(1, 2, 7, 12:18, 23)] <- c(
+  "Entity", "Code", "gini_2022_or_latest", "S80_20_ratio",
+  "Bottom_10_pct", "Bottom_20_pct", "Bottom_40_pct",
+  "Top_40_pct", "Top_20_pct", "Top_10_pct", "Poverty_rate_2022"
+)
+
+# Subset the cleaned dataset to include only relevant columns
+oecd_df_clean <- oecd_df[, c(1, 2, 7, 12:18, 23)]
+
+# Preview structure before transformation
+glimpse(oecd_df_clean)
+
+# Convert character columns to numeric where needed and round for readability
+oecd_df_clean <- oecd_df_clean %>%
+  mutate(
+    Entity = as.factor(Entity),
+    Code = as.factor(Code),
+    gini_2022_or_latest = round(as.numeric(gini_2022_or_latest), 3),
+    across(
+      .cols = c(S80_20_ratio, Bottom_10_pct, Bottom_20_pct, Bottom_40_pct,
+                Top_40_pct, Top_20_pct, Top_10_pct, Poverty_rate_2022),
+      ~ round(as.numeric(.x), 1)
+    )
+  )
+```
+
+
+```{r plot_data_prep, echo=FALSE}
+
+# Prepare data for tornado plot: Top 20% vs Bottom 20% disposable income share
+oecd_tornado <- oecd_df_clean %>%
+  filter(!is.na(Top_20_pct), !is.na(Bottom_20_pct)) %>%
+  select(Entity, Top_20_pct, Bottom_20_pct) %>%
+  mutate(
+    Top_20_pct = round(Top_20_pct, 1),
+    Bottom_20_pct = round(Bottom_20_pct, 1)
+  ) %>%
+  pivot_longer(cols = c(Top_20_pct, Bottom_20_pct), names_to = "group", values_to = "value") %>%
+  mutate(
+    value = if_else(group == "Top_20_pct", value, -value),  # Flip Bottom 20% to left side
+    group = recode(group, "Top_20_pct" = "Top 20%", "Bottom_20_pct" = "Bottom 20%")
+  )
+
+# Order countries by Top 20% share (ascending for plot)
+entity_order <- oecd_tornado %>%
+  filter(group == "Top 20%") %>%
+  arrange(value) %>%
+  pull(Entity)
+
+oecd_tornado$Entity <- factor(oecd_tornado$Entity, levels = entity_order)
+
+# Identify top 5 most unequal countries by Top 20% income share
+top5_countries <- oecd_tornado %>%
+  filter(group == "Top 20%") %>%
+  arrange(desc(value)) %>%
+  slice_head(n = 5) %>%
+  pull(Entity)
+
+# Build the tornado plot
+plot1 <- ggplot(oecd_tornado, aes(x = value, y = Entity, fill = group)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(values = c("Top 20%" = "#1f77b4", "Bottom 20%" = "#ff7f0e")) +
+  scale_x_continuous(
+    limits = c(-100, 100),
+    breaks = seq(-100, 100, by = 10),
+    labels = abs,
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  # Add data labels for Top 5 countries (Top 20% income share)
+  geom_text(
+    data = oecd_tornado %>% filter(Entity %in% top5_countries, group == "Top 20%"),
+    aes(label = paste0(round(value, 1), "%")),
+    hjust = -0.2,
+    size = 3.5,
+    color = "black"
+  ) +
+
+  # Annotation for Top 5 countries
+  annotate("text",
+           x = 65,
+           y = match("Mexico", levels(oecd_tornado$Entity)),
+           label = "These are five countries \nwhere the top 20% hold \nat least 45% of national \ndisposable income.",
+           hjust = 0,
+           size = 3.5,
+           fontface = "italic"
+  ) +
+
+  # Plot labels and theme
+  labs(
+    title = "Disparities in Income Distribution: Top 20% vs Bottom 20% Shares in OECD Countries",
+    subtitle = "Wider gaps = higher inequality: In Costa Rica, Chile, Türkiye, Mexico, and the U.S., the top 20% hold much \nmore than the bottom 20% (<7%). Narrower gaps in countries like Slovak Republic, Slovenia, and Belgium \nreflect more balanced income distribution.",
+    caption = "Source: OECD Key Indicators on Income and Wealth Distribution",
+    x = "Share of National Disposable Income (%)",
+    y = NULL,
+    fill = "Income Group"
+  ) +
+  theme_minimal(base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 12, face = "bold", hjust = 0.5),
+    axis.text.y = element_text(face = "bold", size = 9),
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.text.x = element_text(size = 12, face = "bold", family = "Arial", hjust = 1),
+    plot.caption = element_text(size = 10, hjust = 0),
+    panel.grid.major.y = element_blank(),
+    legend.position = "top"
+  )
+
+```
+
+
+
+
+
+
+
+
+```{r build_plot, echo=FALSE}
+
+# Build the tornado plot
+plot1 <- ggplot(oecd_tornado, aes(x = value, y = Entity, fill = group)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(values = c("Top 20%" = "#1f77b4", "Bottom 20%" = "#ff7f0e")) +
+  scale_x_continuous(
+    limits = c(-100, 100),
+    breaks = seq(-100, 100, by = 10),
+    labels = abs,
+    expand = expansion(mult = c(0, 0))
+  ) +
+
+  # Add data labels for Top 5 countries (Top 20% income share)
+  geom_text(
+    data = oecd_tornado %>% filter(Entity %in% top5_countries, group == "Top 20%"),
+    aes(label = paste0(round(value, 1), "%")),
+    hjust = -0.2,
+    size = 3.5,
+    color = "black"
+  ) +
+
+  # Annotation for Top 5 countries
+  annotate("text",
+           x = 65,
+           y = match("Mexico", levels(oecd_tornado$Entity)),
+           label = "These are five countries \nwhere the top 20% hold \nat least 45% of national \ndisposable income.",
+           hjust = 0,
+           size = 3.5,
+           fontface = "italic"
+  ) +
+  labs(
+    title = "Disparities in Income Distribution: Top 20% vs Bottom 20% Shares in OECD Countries",
+    subtitle = "Wider gaps = higher inequality: In Costa Rica, Chile, Türkiye, Mexico, and the U.S., the top 20% hold much \nmore than the bottom 20% (<7%). Narrower gaps in countries like Slovak Republic, Slovenia, and Belgium \nreflect more balanced income distribution.",
+    caption = "Source: OECD Key Indicators on Income and Wealth Distribution",
+    x = "Share of National Disposable Income (%)",
+    y = NULL,
+    fill = "Income Group"
+  ) +
+  theme_minimal(base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 12, face = "bold", hjust = 0.5),
+    axis.text.y = element_text(face = "bold", size = 9),
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.text.x = element_text(size = 12, face = "bold", family = "Arial", hjust = 1),
+    plot.caption = element_text(size = 10, hjust = 0),
+    panel.grid.major.y = element_blank(),
+    legend.position = "top"
+  )
+```
+
+
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot = plot1,
+  filename = "oecd_plot_linkedin.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+# Key Insights
+- Wide income gaps persist in countries like Costa Rica, Chile, Türkiye, Mexico, and the U.S., where the top 20% hold over 45% of disposable income, and the bottom 20% hold less than 7%.
+- Costa Rica stands out as the most unequal country in the dataset, with the top 20% holding over 50% of national disposable income.
+- In contrast, countries such as Slovakia, Slovenia, Belgium, and Iceland show narrower gaps, with a more balanced distribution between top and bottom earners.
+- Despite accounting for disposable income (after taxes and transfers), inequality remains pronounced in several OECD countries, suggesting limited redistribution impact in those contexts.
+- Tornado plots are effective for revealing relative income share symmetry — highlighting both concentration at the top and marginalization at the bottom simultaneously.
