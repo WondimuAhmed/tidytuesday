@@ -1,0 +1,128 @@
+---
+title: "tidytuesday_2025_08_12"
+output: html_document
+date: "2025-08-12"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Extreme Weather Attribution Studies
+
+This week’s #TidyTuesday explores extreme weather attribution studies based on Carbon Brief’s “Mapped: How climate change affects extreme weather around the world,” with entries separated by event/location when possible and last updated in November 2024. Attribution studies estimate whether—and by how much—human-driven climate change has altered the frequency, intensity, or impacts of extremes (e.g., wildfires in the U.S., drought in South Africa, record rainfall in Pakistan, typhoons in Taiwan). Thanks to Rajo for curating the dataset.
+In this analysis I focus on the first guiding question:
+How have attribution study publications evolved over time, and what does the trend look like for rapid attribution studies?
+
+Specifically, this RMarkdown will:
+
+Load and clean the TidyTuesday attribution dataset.
+Define/identify rapid attribution studies.
+Visualize yearly publication counts and growth rates, highlighting rapid studies.
+All code is reproducible with the tidyverse; figures are generated with ggplot2. Session info is provided at the end for transparency.
+
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,openxlsx)
+
+```
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+# Import the #TidyTuesday data for 2025-08-05
+
+tuesdata <- tidytuesdayR::tt_load('2025-08-12')
+attribution_studies <- tuesdata$attribution_studies
+attribution_studies_raw <- tuesdata$attribution_studies_raw
+
+# Explore structure and completeness
+introduce(attribution_studies)
+introduce(attribution_studies_raw)
+glimpse(attribution_studies)
+glimpse(attribution_studies_raw)
+
+```
+
+# Prepare plot data
+
+```{r Prep_yearly_counts_by_event_type, echo=FALSE}
+
+attribution_yearly <- attribution_studies %>%
+  mutate(pub_year = as.integer(publication_year)) %>%
+  filter(!is.na(pub_year), !is.na(event_type)) %>%
+  count(pub_year, event_type, name = "n") %>%
+  complete(pub_year, event_type, fill = list(n = 0))
+
+# Order legend by total volume across all years
+event_order <- attribution_yearly %>%
+  group_by(event_type) %>% summarise(total = sum(n), .groups = "drop") %>%
+  arrange(desc(total)) %>% pull(event_type)
+
+attribution_yearly <- attribution_yearly %>%
+  mutate(event_type = factor(event_type, levels = event_order))
+
+attribution_yearly <- attribution_yearly %>%
+  mutate(event_type = str_to_title(as.character(event_type)),
+         event_type = factor(event_type, levels = str_to_title(event_order)))
+
+```
+
+```{r attribution_plot, echo=FALSE}
+
+attribution_plot <- ggplot(attribution_yearly, aes(x = pub_year, y = n, fill = event_type))  +
+  geom_area() +
+  geom_smooth(aes(color = event_type),
+              method = "loess", se = FALSE, size = 1, span = 0.5) +
+  scale_x_continuous(breaks = pretty) +
+  labs(
+    title = "Tracking the Surge in Attribution Studies",
+subtitle = "Research on links between extreme weather and climate change has grown dramatically \n over the past decade",
+    x = "Publication Year", y = "Number of Studies",
+    fill = "Event Type", color = "Event Type"  ,
+    caption = "Source: Carbon Brief – Extreme Weather Attribution Studies (Nov 2024 update)"
+  ) +
+  theme_minimal(base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 14,, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.title.y = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.text.x = element_text(size = 12, face = "bold", family = "Arial", hjust = 1),
+    axis.text.y = element_text(size = 12, face = "bold", family = "Arial"),
+    plot.caption = element_text(size = 10, hjust = 0),
+    panel.grid.major.y = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 12, family = "Arial"),
+    legend.text  = element_text(face = "bold", size = 10, family = "Arial")
+  )
+attribution_plot
+
+```
+
+
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot = attribution_plot,
+  filename = "attribution_plot.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+# Key Insights
+
+- Sharp Growth – Attribution studies have surged since 2010, peaking around 2018–2020 and 2023–2024.
+- Heat Dominates – Heat-related events are the most studied, especially during peak years.
+- Broadening Scope – Research now covers more event types, including rain/flooding, drought, storms, and compound events.
+- Rain & Flooding Rising – Strong growth in recent years, sometimes rivaling heat studies.
+- Emerging Focus – More studies on compound events and impacts in the past five years.
