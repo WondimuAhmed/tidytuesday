@@ -1,0 +1,158 @@
+---
+title: "tidytuesday_2025_08_19"
+output: html_document
+date: "2025-08-19"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Scottish Munros
+
+This week’s #TidyTuesday explores Scotland’s Munros using data from the Database of British and Irish Hills (DoBIH v18.2), curated by Nicola Rennie. A Munro is a Scottish mountain over 3,000 feet; a Munro Top is a subsidiary summit also exceeding 3,000 ft but not considered a distinct mountain. The first tables were compiled by Sir Hugh Munro in 1891. Unlike other Scottish lists that require a fixed prominence (e.g., 500 ft), the Munros lack a rigid criterion—so improved surveying and editorial judgment have led to periodic reclassifications (e.g., Munro ↔ Munro Top, and occasional new additions).
+
+In this analysis I focus on two guiding questions:
+How have Munro classifications changed across editions (1891 → 1921 → 1981 → 1997 → 2021)?
+Which year saw the largest number of reclassifications, and in what directions (Munro → Top vs Top → Munro)?
+
+Data source: The Database of British and Irish Hills v18.2 (Creative Commons Attribution 4.0 International Licence). 
+
+Thanks to Nicola Rennie for curating this week’s dataset.
+
+This R Markdown will:
+Load and tidy the TidyTuesday Munros dataset
+Reshape classifications by edition and detect reclassifications:Munro ↔ Munro Top
+
+Summarize and visualize reclassification counts by edition year
+Provide fully reproducible code using tidyverse. Session info included for transparency.
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,openxlsx)
+
+```
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+# Import the #TidyTuesday data for 2025-08-19
+
+tuesdata <- tidytuesdayR::tt_load('2025-08-19')
+scottish_munros <- tuesdata$scottish_munros
+
+
+# Explore structure and completeness
+introduce(scottish_munros)
+
+glimpse(scottish_munros)
+
+
+```
+
+# Prepare plot data
+
+```{r munro_plot_data_prep, echo=FALSE}
+
+year_cols <- names(scottish_munros) %>%
+  stringr::str_subset("^(18|19|20)\\d{2}$") %>%
+  as.integer() %>%
+  sort() %>%
+  as.character()
+
+
+munros_long <- scottish_munros %>%
+  select(DoBIH_number, Name, all_of(year_cols)) %>%
+  pivot_longer(all_of(year_cols), names_to = "Year", values_to = "Class") %>%
+  mutate(Year = as.integer(Year)) %>%
+  arrange(DoBIH_number, Year)
+
+changes_by_year <- munros_long %>%
+  group_by(DoBIH_number) %>%
+  arrange(Year, .by_group = TRUE) %>%
+  mutate(changed = Class != lag(Class)) %>%
+  ungroup()
+
+reclass_counts <- changes_by_year %>%
+  filter(!is.na(changed)) %>%
+  group_by(Year) %>%
+  summarise(n_changes = sum(changed), .groups = "drop") %>%
+  arrange(n_changes)
+
+
+```
+
+
+```{r, munro_plot, echo=FALSE}
+
+munro_lollipop <- reclass_counts %>%
+  mutate(Year = fct_reorder(factor(Year), n_changes, .desc = FALSE)) %>%
+  ggplot(aes(x = Year, y = n_changes)) +
+  geom_segment(aes(xend = Year, y = 0, yend = n_changes),
+               color = "purple", linewidth = 3) +
+  geom_point(size = 10, color = "purple") +
+  geom_text(aes(label = n_changes), color = "white", size = 4, vjust = 0.5) +
+  labs(
+    title = "Munro Reclassifications by Year (1891–2021)",
+    subtitle = "The biggest shake-up was in 1921 with 33 reclassifications. \n Later years (1981, 1997) saw smaller bumps, while most remained unchanged.",
+    x = "Edition Year", y = "Number of Munros Reclassified",
+        caption = "Source:The Database of British and Irish Hills \n
+    https://www.hills-database.co.uk \n 
+    Reclassification is defined as a change in status between Munro (MUN) and Munro Top (TOP) \n 
+    in successive editions."
+
+  ) +
+  theme_minimal(base_family = "sans") +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(face = "bold", size = 14, hjust = 0.5),
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.title.x =  element_text(size = 14, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    panel.grid.major.y = element_blank(),
+    legend.position = "none",
+   plot.caption = element_text(lineheight = 0.5),
+    panel.background = element_rect(fill = "yellow", color = NA),
+    plot.background  = element_rect(fill = "yellow", color = NA)
+  ) +
+  coord_flip()
+
+munro_lollipop
+
+```
+
+
+
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot = munro_lollipop,
+  filename = "munro_lollipop.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+# Key Insights
+
+- Major Shake-Up in 1921 – A total of 33 reclassifications, the largest in Munro history, reflecting Sir Hugh Munro’s substantial revisions.
+- Notable Adjustments in 1981 – 16 changes occurred, marking the second-largest revision based on more accurate mapping.
+- Moderate Revisions in 1997 – 10 changes under Alan Dawson’s tables, bringing the list closer to its modern form.
+- Minimal Changes Elsewhere – Other years saw very few adjustments (1–3), showing overall stability in the classification.
+- Recent Stability – By 2021, only one Munro was reclassified, highlighting that the list has largely settled.
+
+
+
+```{r}
+sessioninfo()
+```
+
+
