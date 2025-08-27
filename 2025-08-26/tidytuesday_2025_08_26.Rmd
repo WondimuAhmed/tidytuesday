@@ -1,0 +1,226 @@
+---
+title: "tidytuesday_2025_08_26"
+output: html_document
+date: "2025-08-26"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Billboard Hot 100 Number Ones
+This week’s #TidyTuesday explores the Billboard Hot 100 Number Ones Database. The dataset includes every song that reached #1 between August 4, 1958 and January 11, 2025, compiled by "Chris Dalla Riva as part of his book Uncharted Territory: What Numbers Tell Us about the Biggest Hit Songs and Ourselves and his newsletter Can’t Get Much Higher".
+The database provides detailed information on each chart-topper: song and artist metadata, instrumentation, tempo, energy, lyrical topics, explicitness, and more. With over six decades of data, it offers a unique lens on how popular music has evolved.
+
+In this analysis I focus on one guiding question:
+How has the genre composition of #1 hits shifted across time?
+
+I take inspiration from Google’s classic “Music Timeline,” stacking genres over the years to show their relative prominence. The goal is to trace the rise, fall, and persistence of styles such as rock, pop, R&B, country, and hip-hop, and to see how the overall soundscape of the Billboard Hot 100 reflects broader cultural changes.
+
+Data source: Billboard Hot 100 Number Ones Database (Creative Commons Attribution 4.0 International Licence).
+
+Thanks to Jen Richmond for curating this week’s dataset.
+
+This R Markdown will:
+Load and tidy the TidyTuesday Billboard dataset
+Aggregate and smooth yearly genre shares of #1 hits
+Visualize changing genre composition in a timeline-style stacked area chart
+Provide fully reproducible code using tidyverse
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,slider) 
+
+```
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-08-26')
+
+billboard <- tuesdata$billboard
+topics <- tuesdata$topics
+
+# Explore structure and completeness
+introduce(billboard)
+
+glimpse(billboard)
+
+min(billboard$date)
+names(billboard)
+```
+
+
+
+# Prepare plot data
+```{r prepare_plot_data, echo=FALSE}
+
+bb_data <- billboard %>%
+  mutate(year = year(date), genre = cdr_genre ) %>%  # Assigned by Chris Dalla Riva & Vinnie Christopher. 
+  filter(!is.na(year), year >= 1958, !is.na(genre)) 
+
+# Identify the seven most common genres (inspired by the seven-genre framing in:
+# Sanneh, K. (2021). Major Labels: A History of Popular Music in Seven Genres. Penguin.
+
+top7_genres <- bb_data %>% count(genre, sort = TRUE) %>% slice_head(n = 7) %>% pull(genre)
+
+bb_data <- bb_data %>%
+  mutate(genre7 = if_else(genre %in% top7_genres, genre, "Other"),
+         genre7 = forcats::fct_drop(forcats::fct_relevel(genre7, c(top7_genres, "Other"))))
+
+bb_years <- seq(min(bb_data$year), max(bb_data$year), by = 1)
+
+# Yearly shares 
+yearly <- bb_data %>%
+  count(year, genre7, name = "n") %>%
+  complete(year = bb_years, genre7, fill = list(n = 0)) %>%
+  group_by(year) %>%
+  mutate(pct = n / sum(n)) %>%   
+  ungroup()
+
+# 5-year centered rolling mean per genre
+yearly_smooth <- yearly %>%
+  group_by(genre7) %>%
+  arrange(year, .by_group = TRUE) %>%
+  mutate(pct_roll5 = slide_dbl(pct, mean, .before = 2, .after = 2, .complete = FALSE)) %>%
+  ungroup()
+
+# Re-normalize by year so smoothed shares still sum to 1
+yearly_smooth <- yearly_smooth %>%
+  mutate(pct_roll5 = replace_na(pct_roll5, 0)) %>%
+  group_by(year) %>%
+  mutate(pct_smooth = pct_roll5 / pmax(sum(pct_roll5), 1e-9)) %>%
+  ungroup()
+
+order_by_share <- yearly_smooth %>%
+  group_by(genre7) %>%
+  summarise(avg_share = mean(pct_smooth, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(avg_share)) %>%
+  pull(genre7) %>%
+  as.character()  
+
+yearly_smooth <- yearly_smooth %>%
+  mutate(
+    genre7 = factor(as.character(genre7), levels = order_by_share)
+  )
+
+order_by_share <- c(setdiff(order_by_share, "Other"), "Other")
+
+yearly_smooth <- yearly_smooth %>%
+  mutate(
+    genre7 = factor(as.character(genre7), levels = order_by_share)
+  )
+```
+
+```{r, create_plot, echo=FALSE}
+# define color pals
+
+my_pal <- c(
+  "#c94f4f", "#d9a441", "#7aa0c4", "#2b5876",
+  "#47a3b6", "#b0b0b0", "#A020F0", "#00FF00"
+
+)
+
+bb_area_plot <- ggplot(yearly_smooth, aes(x = year, y = pct_smooth, fill = genre7)) +
+  geom_area(color = NA) +
+  scale_fill_manual(values = my_pal) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     breaks = seq(0, 1, by = 0.2),
+                     expand = expansion(mult = c(0, 0))) +
+  scale_x_continuous(
+  breaks = seq(1960, 2019, by = 10),   
+  limits = c(1958, 2019),             
+  expand = expansion(mult = c(0.005, 0.02))
+) +
+
+  labs(
+    title = "Billboard #1 Hits by Genre (1958–2019)",
+    x = NULL, y = NULL,
+    caption = "Source: Billboard Hot 100 Number Ones. \n  Genres: Chris Dalla Riva & Vinnie Christopher.  Data through Jan 11, 2025; \n  last genre update Sept 7, 2019"
+  ) +
+
+theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    axis.text.x = element_text(size = 12, face = "bold"),
+    axis.title.x =  element_text(size = 14, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  ) +
+  # Overlay text labels at approximate places
+  annotate("text", x = 1970, y = 0.85, label = "Pop", fontface = "bold", size = 4, color = "black") +
+  annotate("text", x = 1978, y = 0.55, label = "Rock", fontface = "bold", size = 4, color = "black") +
+  annotate("text", x = 1996, y = 0.50, label = "Funk/Soul", fontface = "bold", size = 4, color = "black") +
+  annotate("text", x = 2004, y = 0.35, label = "Hip Hop", fontface = "bold", size = 4, color = "black") +
+  annotate("text", x = 2010, y = 0.18, label = "Electronic/Dance", fontface = "bold", size = 4, color = "black", angle=40) +
+   annotate("text", x = 1970, y = 0.07, label = "Folk/Country", fontface = "bold", size = 4, color = "black") +
+  annotate("text", x = 2015, y = 0.05, label = "Reggae", fontface = "bold", size = 4, color = "black", angle=12) +
+  annotate("text", x = 1990, y = 0.03, label = "Other", fontface = "bold", size = 4, color = "black") 
+bb_area_plot
+
+```
+
+```{r create_alternative_line_plot, echo=FALSE}
+
+my_levels <- levels(yearly_smooth$genre7)
+pal_use <- setNames(my_pal[seq_along(my_levels)], my_levels)
+
+bb_line_plot <- ggplot(yearly_smooth, aes(x = year, y = pct_smooth, color = genre7)) +
+  geom_line(linewidth = 1.1, na.rm = TRUE) +
+  scale_color_manual(values = pal_use, name = NULL) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     breaks = seq(0, 1, by = 0.2),
+                     expand = expansion(mult = c(0, 0.02))) +
+  scale_x_continuous(breaks = seq(1960, max(yearly_smooth$year), by = 10),
+                     expand = expansion(mult = c(0.005, 0.02))) +
+ labs(
+    title = "Billboard #1 Hits by Genre (1958–2019)",
+    x = NULL, y = NULL,
+    caption = "Source: Billboard Hot 100 Number Ones. \n  Genres: Chris Dalla Riva & Vinnie Christopher.  Data through Jan 11, 2025; \n  last genre update Sept 7, 2019"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank()
+  )
+
+bb_line_plot 
+
+```
+
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot =bb_area_plot ,
+  filename = "billboard_genre_evol.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+# Key Insights
+- Pop & Rock Lead (1960s–1970s) – Pop began dominant in the early ’60s, with Rock quickly rising to rival it; together they shaped most #1 hits of those decades.
+- Funk/Soul Peak (1970s) – Funk and Soul surged through the 1970s, briefly overtaking Rock, but collapsed sharply in the early 1980s after the disco era.
+- Hip Hop Era (1990s–2010s) – Starting in the late 1980s, Hip Hop grew steadily to become the central genre of the 2000s and early 2010s, often accounting for nearly half of all #1 hits.
+- Electronic/Dance Boom (2000s–2010s) – The mid-2000s to early 2010s saw Electronic/Dance break through, reflecting the EDM/pop crossover and club culture.
+- Country & Reggae as Minor Currents – Country/Folk and Reggae made occasional chart-topping appearances but never exceeded small shares of #1 hits.
+- Diversification in the 21st Century – Recent decades show no single genre holding majority dominance; instead, Pop, Hip Hop, and Electronic/Dance trade leadership, while “Other” reflects growing stylistic experimentation
+
+
+```{r}
+#sessioninfo()
+```
+
+
