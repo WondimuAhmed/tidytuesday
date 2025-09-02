@@ -1,0 +1,197 @@
+---
+title: "tidytuesday_2025_08_26"
+output: html_document
+date: "2025-08-26"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Australian Frogs
+
+This week we're exploring 2023 data from the sixth annual release of FrogID data.
+
+FrogID is an Australian frog call identification initiative. The FrogID mobile app allows citizen scientists to record and submit frog calls for museum experts to identify. Since 2017, FrogID data has contributed to over 30 scientific papers exploring frog ecology, taxonomy, and conservation.
+
+Australia is home to a unique and diverse array of frog species found almost nowhere else on Earth, with 257 native species distributed throughout the continent. But Australia’s frogs are in peril – almost one in five species are threatened with extinction due to threats such as climate change, urbanisation, disease, and the spread of invasive species.
+Some questions you might explore:
+
+Are there species that are endemic to certain regions?
+Do different frog species have distinct calling seasons?
+Which species has the widest geographic range? Which is the rarest?
+Primary citation for FrogID data: Rowley JJL, & Callaghan CT (2020) The FrogID dataset: expert-validated occurrence records of Australia’s frogs collected by citizen scientists. ZooKeys 912: 139-151
+
+Official frog name data: Australian Society of Herpetologists Official List of Australian Species. 2025. http://www.australiansocietyofherpetologists.org/ash-official-list-of-australian-species.
+
+Thank you to Jessica Moore for curating this week's dataset.
+
+This R Markdown will:
+Load and tidy the TidyTuesday dataset
+Prepare data for plot(s)
+Visualize seasonality using heatmap
+Provide fully reproducible code using tidyverse
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor) 
+
+```
+
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-09-02')
+
+frogID_data <- tuesdata$frogID_data
+frog_names <- tuesdata$frog_names
+
+# Explore structure and completeness
+introduce(frog_names)
+introduce(frogID_data)
+
+glimpse(frog_names)
+glimpse(frogID_data)
+
+```
+
+# Data Prep
+```{r data_prep, echo=FALSE}
+
+frogs_data <- frogID_data %>% 
+  clean_names() %>%
+  left_join(frog_names %>%clean_names() %>%
+    select(scientific_name, subfamily,tribe, common_name) %>%
+    distinct(), by = "scientific_name")
+
+frogs_data <- frogs_data %>%
+  transmute(
+    species = common_name,
+    date    = ymd(substr(event_date, 1, 10)),
+    month   = month(date)
+  ) %>%
+  filter(!is.na(species), !is.na(month))
+
+
+top_10 <- 10
+top_species <- frogs_data  %>%
+  count(species, name = "records") %>%
+  slice_max(records, n = top_10, with_ties = FALSE) %>%
+  pull(species)
+
+# Monthly proportions within each species
+seasonality <- frogs_data  %>%
+  filter(species %in% top_species) %>%
+  count(species, month, name = "calls") %>%
+  complete(species, month = 1:11, fill = list(calls = 0)) %>%
+  group_by(species) %>%
+  mutate(prop = calls / sum(calls)) %>%
+  ungroup() %>%
+  mutate(month = factor(month, levels = 1:11, labels = month.abb[1:11]))
+
+
+```
+
+# Plot 
+## Heatmap
+```{r heat_map_seasonality_plot, echo=FALSE}
+
+frog_songs_heatmap <- ggplot(seasonality, aes(x = month, y = fct_reorder(species, species), fill = prop)) +
+  geom_tile() +
+   scale_fill_distiller(palette = "Spectral",
+                       labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Frogs on the Calendar: When Each Species Sings Its Love Song",
+    subtitle= "Heatmap of monthly call activity across Australia’s top 10 frog species (Jan–Nov, 2023)",
+    caption = "Source: Rowley,J.J.L., & Callaghan C.T. (2020). The FrogID dataset: expert-validated occurrence records of Australia’s frogs \n collected by citizen scientists. ZooKeys 912: 139-151",
+    x = "Month", y = "Common Name", fill = "% of Yearly Calls"
+  ) +
+theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, face = "bold",hjust = 0.5),
+    plot.caption = element_text(size = 6, face = "bold",hjust = 0.5),
+    axis.text.x = element_text(size = 10, face = "bold"),
+    axis.title.x =  element_text(size = 14, face = "bold"),
+    axis.text.y = element_text(size = 10, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank()
+    )
+frog_songs_heatmap
+
+
+
+```
+
+## Line plot
+```{r aditiona_line_plot, echo=FALSE}
+
+ggplot(seasonality, aes(month, prop, group = species, color = species)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.6) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Monthly Calling Seasonality",
+    x = "Month", y = "Share of Yearly Calls", color = "Species"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(), legend.position = "right")
+
+```
+
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot =frog_songs_heatmap ,
+  filename = "frog_songs_heatmap.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+# Key Insights
+- Early Callers (Jan–Feb) – Species like the Green Tree Frog and Graceful Tree Frog dominate the soundscape early in the year, taking advantage of summer rains.
+- Late-Season Specialists (Sep–Nov) – Frogs such as Peron’s Tree Frog and the Eastern Banjo Frog peak toward spring and early summer, timing calls with warming conditions.
+- Year-Round Callers – Generalists like the Common Eastern Froglet and Brown Tree Frog maintain activity across most months, showing broad breeding windows.
+- Mid-Year Lulls (Apr–Jul) – Many species go quiet during the cooler, drier months, reflecting reduced breeding activity.
+- Distinct Strategies – Some species rely on short, intense peaks, while others spread activity across the year—an evolutionary division of the “calling calendar” that reduces competition and boosts survival.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+`
+
+
+
+
+
+
+
+
+
+
+```{r}
+#sessioninfo()
+```
+
+
