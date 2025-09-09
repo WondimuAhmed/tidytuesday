@@ -1,0 +1,174 @@
+---
+title: "tidytuesday_2025_09_09"
+output: html_document
+date: "2025-09-09"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Henley Passport Index: Focus on Africa
+This week I’m exploring global mobility through the Henley Passport Index with a specific focus on African passports. The Index counts how many destinations each passport can enter without pre-departure government approval. For every origin–destination pair, a score of 1 is assigned if travelers can enter visa-free, with a visa on arrival, a visitor’s permit, or an electronic travel authority (ETA); a score of 0 applies when an e-Visa (or any pre-approved visa) is required. A passport’s total score is the sum of destinations with value 1. Rankings are updated monthly and reflect global ranks—recent shifts have drawn notable attention.
+Question to explor
+Which African countries posted the biggest gains (or losses) in visa-free access?
+Thanks to Brenden Smith and Jen Richmond for curating this week’s dataset.
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,ggbump,patchwork) 
+
+```
+
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-09-09')
+
+country_lists <- tuesdata$country_lists
+rank_by_year <- tuesdata$rank_by_year
+
+# Explore structure and completeness
+introduce(country_lists )
+introduce(rank_by_year)
+
+glimpse(country_lists )
+glimpse(rank_by_year )
+
+
+```
+
+
+
+# Data Prep
+
+
+```{r data_prep, echo= FALSE}
+
+africa_data <- rank_by_year %>%
+  filter(region == "AFRICA") %>% 
+  drop_na()
+
+top_3 <- africa_data %>%
+  filter(year == 2025) %>%
+  slice_min(order_by = rank, n = 3, with_ties = TRUE) %>%
+  arrange(rank)
+
+pad <- 0.6
+
+
+```
+
+
+
+
+# Plot 
+## Bump plot
+```{r bump_plot, echo=FALSE}
+
+passport_bump_plot <-
+  ggplot(africa_data,
+         aes(x = year, y = rank, group = country, alpha = -rank, colour = -rank)) +
+  geom_bump(size = 1,  show.legend = FALSE) +
+  geom_point(size = 2, shape = 21, fill = "white", stroke = 1.2, show.legend = FALSE) +
+  scale_color_gradientn(
+    colours = c("#deebf7", "#00008B", "#000000"),
+    values  = scales::rescale(c(0, 0.8, 1)),
+    guide   = "none"
+  ) +
+  geom_text_repel(
+    data = top_3,
+    aes(label = country, colour = -rank),
+    nudge_x = 0.3, hjust = 0, direction = "y",
+    min.segment.length = Inf, seed = 42, size = 3.8,
+    show.legend = FALSE
+  ) +
+  scale_y_reverse(limits = c(120, 1), breaks = seq(1, 120, by = 9)) +
+  scale_x_continuous(
+    breaks = c(2006, 2010, 2015, 2020, 2025),
+    expand = expansion(mult = c(0.02, 0.14))
+  ) +
+  coord_cartesian(xlim = c(2006, 2025 + pad), clip = "off") +
+  labs(  title = "African Passport Power (2006–2025): Seychelles & Mauritius lead; \n South Africa follows. Most never hit the global top 50. ",
+  subtitle = "Seychelles edges upward to new highs, Mauritius dips mid-2010s then recovers, \n and South Africa breaks a long plateau with a 2025 upswing.",
+  caption = "Data Source: https://www.henleyglobal.com/passport-index/", 
+  x = "Year", y = "Global Rank (Lower is Better)") +
+  
+
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    panel.grid       = element_blank(),
+    panel.background = element_rect(fill = "yellow", colour = NA),
+    plot.background  = element_rect(fill = "yellow", colour = NA),
+    axis.text.y  = element_text(size = 8, face = "bold", family = "Arial"),
+    axis.title.y = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    strip.text   = element_text(face = "bold", size = 13),
+    plot.title   = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle= element_text(size = 12, face = "bold", hjust = 0.5, lineheight = 1.2),
+    axis.text.x  = element_text(size = 8, face = "bold", family = "Arial", angle = 45, hjust = 1)
+  )
+
+passport_bump_plot
+
+
+```
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot =passport_bump_plot ,
+  filename = "passport_bump_plot.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+
+
+# Key Insights
+
+- Seychelles ( 156 destinations) and Mauritius (149) dominate Africa’s passport power.
+- South Africa rebounds post-COVID (103), breaking a long plateau.
+- Most countries cluster around r50–90, with gradual gains, not leaps.
+- COVID effect: Clear dip in 2020–21, followed by recovery into 2023–25.
+ -Access gap: Top passports offer ~150+ destinations—far above the continental median.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+`
+
+
+
+
+
+
+
+
+
+
+```{r}
+#sessioninfo()
+```
+
+
