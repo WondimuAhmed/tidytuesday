@@ -1,0 +1,148 @@
+---
+title: "tidytuesday_2025_09_16"
+output: html_document
+date: "2025-09-16"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Southern Recipes: Comfort Food Meets Data
+This week’s #TidyTuesday dataset comes from Allrecipes.com via the tastyR package. With over 14,000 recipes and 2,200 tagged by cuisine, it offers a rich view into what people cook, rate, and review.
+I’m focusing on Southern cuisine—a category that blends tradition, comfort, and storytelling. From fried chicken to banana split cake, these dishes highlight both high ratings and strong popularity across thousands of reviews.
+Questions to explore:
+Which Southern recipes earn the highest ratings?
+Do desserts or mains dominate?
+Thanks to Brian Mubia for curating this week’s dataset.
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,ggbump,patchwork) 
+
+```
+
+
+# Import the Data
+```{r load_data, echo=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-09-16')
+
+all_recipes <- tuesdata$all_recipes
+cuisines <- tuesdata$cuisines
+
+# Explore structure and completeness
+introduce(all_recipes )
+introduce(cuisines)
+
+glimpse(all_recipes)
+glimpse(cuisines)
+
+
+
+```
+
+
+
+# Data Prep
+
+```{r data_prep, echo= FALSE}
+
+country_rank <- cuisines %>%
+  group_by(country) %>%
+  summarise(
+    n_recipes   = n(),
+    avg_rating  = mean(avg_rating, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(avg_rating))
+country_rank
+
+
+
+top10_southern <- cuisines %>%
+  filter(!is.na(avg_rating), !is.na(total_ratings)) %>%
+  filter(country == "Southern Recipes", total_ratings >=100) %>%                     
+  mutate(total_ratings = pmax(total_ratings, 0)) %>%    
+  group_by(name) %>%                               
+  summarise(
+    n_entries   = n(),
+    total_votes = sum(total_ratings, na.rm = TRUE),
+    wt_rating   = weighted.mean(avg_rating, total_ratings, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(wt_rating), desc(total_votes)) %>%
+  slice_head(n = 10)
+
+
+
+```
+
+
+# Plot
+```{r plot, echo=FALSE}
+ 
+Southern_Recipes_Plot<- ggplot(  top10_southern, aes(x = reorder(name, wt_rating), y = wt_rating)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 10 Southern Recipes",
+    x = NULL,
+    y = "Weighted Average Rating",
+    caption = "Data source: allrecipes.com"
+  ) +
+  geom_text( color= "white", aes( label = sprintf("%.2f (n=%s)", wt_rating, scales::comma(total_votes))),
+            hjust = 1.02, size = 3) +
+  theme_minimal(base_size = 12) +
+theme(
+    legend.position = "none",
+    panel.grid       = element_blank(),
+    panel.background = element_rect(fill = "orange", colour = NA),
+    plot.background  = element_rect(fill = "orange", colour = NA),
+    axis.text.y  = element_text(colour= "black", size = 12, face = "bold", family = "Arial"),
+    axis.title.y = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    strip.text   = element_text(face = "bold", size = 13),
+    plot.title   = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle= element_text(size = 12, face = "bold", hjust = 0.5, lineheight = 1.2),
+    axis.text.x  = element_text(size = 12, face = "bold", family = "Arial",  hjust = 1)
+  )
+Southern_Recipes_Plot
+```
+
+
+
+
+
+
+
+```{r save_plot, echo=FALSE}
+ggsave(
+  plot =Southern_Recipes_Plot ,
+  filename = "Southern_Recipes_Plot.png",
+  width = 12,    
+  height = 6.3,  
+  units = "in",
+  dpi = 600
+)
+
+```
+
+
+
+
+# Key Insights
+
+
+- Bread Pudding (n≈637) and Low Country Boil (n≈554) pull huge review counts while holding strong at ~4.8★—signal of broad, durable appeal beyond niche fandoms.
+
+-The 4.9★ cluster—Banana Split Cake, Grilled BBQ Ribs, Fried Green Tomatoes, Honey BBQ Sauce—shows no rating penalty by type. With ratings tightly compressed (4.8–5.0), popularity (n) becomes the differentiator.
+
+
+
+
+
+
+
