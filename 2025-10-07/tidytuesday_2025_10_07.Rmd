@@ -1,0 +1,118 @@
+---
+title: "tidytuesday_2025_10_07"
+output:
+  html_document: default
+  pdf_document: default
+date: "2025-10-07"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# EuroLeague Basketball 
+
+This week’s #TidyTuesday dataset explores EuroLeague Basketball—the top-tier men’s club competition in Europe, where national champions and powerhouses meet on one court.
+I’m focusing on arenas—the question that captures the scale of the game:
+ "Which countries boast the biggest EuroLeague arenas?"
+Each team’s home court tells a story of local passion and infrastructure: from 3,000-seat halls in historic cities to 20,000-seat mega-arenas in basketball-mad capitals. We can compare how seating size varies across nations, explore whether larger venues align with winning records, and even visualize how geography shapes basketball fandom.
+Thanks to Natasa Anastasiadou for curating this week’s dataset!
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,ggbump,patchwork, slider) 
+
+```
+
+# Import the Data
+```{r load_data, echo=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-10-07')
+
+euroleague_basketball <- tuesdata$euroleague_basketball
+
+
+# Explore structure and completeness
+introduce(euroleague_basketball  )
+
+
+glimpse(euroleague_basketball )
+
+
+
+```
+
+# Data Prep
+```{r}
+dat <- euroleague_basketball %>%
+  clean_names() %>%
+  mutate(
+    across(c(team, country, arena), ~ stringr::str_squish(.x))
+  )
+
+# Parse capacities
+cap_long <- dat %>%
+  mutate(cap_tokens = stringr::str_extract_all(capacity, "\\d[\\d,\\.]*")) %>%
+  tidyr::unnest_longer(cap_tokens, values_to = "cap_token") %>%
+  mutate(capacity_num = readr::parse_number(cap_token)) %>%
+  filter(!is.na(capacity_num))
+
+# Max per team (if multiple arenas), then max per country
+country_max <- cap_long %>%
+  group_by(country, team) %>%
+  summarise(team_max_capacity = max(capacity_num), .groups = "drop") %>%
+  group_by(country) %>%
+  summarise(max_capacity = max(team_max_capacity), .groups = "drop") %>%
+  arrange(desc(max_capacity)) %>%
+  mutate(
+    max_capacity_lab = label_comma()(max_capacity)
+  )
+
+# Lollipop plot 
+ggplot(country_max,
+       aes(x = max_capacity, y = forcats::fct_reorder(country, max_capacity))) +
+  geom_segment(aes(x = 0, xend = max_capacity, y = country, yend = country),
+               linewidth = 1, alpha = 0.6) +
+  geom_point(size = 3) +
+  geom_text(aes(label = max_capacity_lab), hjust = -0.15, size = 3.5) +
+  scale_x_continuous(
+    labels = label_comma(),                 # stable across {scales} versions
+    expand = expansion(mult = c(0, 0.1))
+  ) +
+  labs(
+    title = "Maximum EuroLeague Arena Capacity by Country",
+    subtitle = "Each Country’s Largest Listed Home-Arena Capacity",
+    x = "Max Capacity (Seats)", y = NULL,
+    caption = "Source: EuroleagueBasketball"
+  ) +
+ theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    panel.grid       = element_blank(),
+    panel.background = element_rect(fill = "gold", colour = NA),
+    plot.background  = element_rect(fill = "gold", colour = NA),
+    axis.text.y  = element_text(size = 12, face = "bold", family = "Arial",colour = "black"),
+    axis.title.y = element_text(size = 12, face = "bold", family = "Arial"),
+    axis.title.x = element_text(size = 12, face = "bold", family = "Arial"),
+    strip.text   = element_text(face = "bold", size = 13),
+    plot.title   = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle= element_text(size = 12, face = "bold", hjust = 0.5, lineheight = 1.2),
+    axis.text.x  = element_text(size = 8, face = "bold", family = "Arial", hjust = 1)
+  )
+
+
+# Optional:
+ ggsave("country_max_capacity_lollipop.png", width = 9.5, height = 7.5, dpi = 320)
+ 
+ 
+
+```
+
+
+# Key Insights
+- Neck-and-neck at the top: Serbia (18,386) edges Greece (18,300) by just 86 seats—effectively a tie for largest EuroLeague arena capacity.
+- Clear upper tier: United Arab Emirates (17,000) rounds out the top three, signaling strong venue investment in a newer market.
+- Core capacity band: Most countries cluster between ~11,500 and 15,700 seats (France, Spain, Lithuania, Turkey, Italy, Israel, Germany)—a tight mid-range.
+- Takeaway: If you’re chasing the loudest, largest crowds, look to Belgrade and Athens—this week’s tidytuesday snapshot suggests they set the bar for EuroLeague scale.
