@@ -1,0 +1,151 @@
+---
+title: "tidytuesday_2025_10_14"
+output:
+  html_document: default
+  pdf_document: default
+date: "2025-10-14"
+---
+
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# FAO Food Security Indicators
+This week’s #TidyTuesday dataset focuses on the Food and Agriculture Organization (FAO). FAO is celebrating 80 years of the world’s collective effort to end hunger.
+The data comes from FAO’s Suite of Food Security Indicators, which tracks global patterns in food access, nutrition, and agricultural resilience.
+I focused on one of the most urgent measures:
+“Prevalence of severe food insecurity in the total population (percent, 3-year average)”
+This indicator captures the share of people in each country living in households where adults have gone hungry — skipping meals, reducing portions, or going an entire day without eating due to lack of resources.
+
+This analysis is both a celebration and a reminder:
+Eighty years on, the world produces enough food — yet equitable access remains our greatest challenge.
+
+
+# Load Required Libraries
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(pacman)
+p_load( tidyverse, tidytuesdayR, DataExplorer, tools, scales, janitor,ggbump,patchwork, slider) 
+
+```
+
+# Import the Data
+```{r load_data, echo=FALSE}
+
+tuesdata <- tidytuesdayR::tt_load('2025-10-14')
+
+food_security <- tuesdata$food_security
+
+
+# Explore structure and completeness
+introduce (food_security)
+
+
+glimpse(food_security )
+
+head(food_security)
+
+```
+
+
+
+# Data Prep
+```{r}
+
+my_indicator <- "Prevalence of severe food insecurity in the total population (percent) (3-year average)"
+
+# I wanted to keep only countries (excluding regions)
+world_regions <- map_data("world") %>% distinct(region) %>% pull(region)
+
+fs_countries <- food_security %>%
+  transmute(
+    year = as.integer(Year_End),
+    area = Area,
+    item = Item,
+    value = as.numeric(Value)
+  ) %>%
+  mutate(region = case_when(
+    area == "United States of America" ~ "USA",
+    area == "United Kingdom of Great Britain and Northern Ireland" ~ "United Kingdom",
+    area == "Russian Federation" ~ "Russia",
+    area == "Côte d'Ivoire" ~ "Ivory Coast",
+    area == "Iran (Islamic Republic of)" ~ "Iran",
+    area == "Viet Nam" ~ "Vietnam",
+    area == "Lao People's Democratic Republic" ~ "Laos",
+    area == "Syrian Arab Republic" ~ "Syria",
+    area == "Eswatini" ~ "Swaziland",
+    area == "Türkiye" ~ "Turkey",
+    area == "Republic of Moldova" ~ "Moldova",
+    area == "Bolivia (Plurinational State of)" ~ "Bolivia",
+    area == "Venezuela (Bolivarian Republic of)" ~ "Venezuela",
+    area == "Democratic Republic of the Congo" ~ "Democratic Republic of the Congo",
+    area == "China, mainland" ~ "China",
+    TRUE ~ area
+  )) %>%
+  semi_join(tibble(region = world_regions), by = "region")
+
+severe_fi <- fs_countries %>%
+  filter(item == my_indicator, !is.na(value))
+
+# the most recent year available (2024)
+latest_year <- max(severe_fi$year, na.rm = TRUE)
+
+# Prepare top 20 countries 
+top20 <- severe_fi %>%
+  filter(year == latest_year) %>%
+  arrange(desc(value)) %>%
+  slice_head(n = 20) %>%
+  mutate(area = if_else(area == "Democratic Republic of the Congo", 
+                        "DR Congo", 
+                        as.character(area))) %>%
+  mutate(area = fct_reorder(area, value))
+
+```
+
+# Plot 
+```{r, plot, echo=FALSE}
+
+# plot
+ggplot(top20, aes(x = value, y = area)) +
+  geom_col(fill = "#b22222", colour = "white", width = 0.7, linewidth = 0.2) +
+  geom_text(aes(label = paste0(round(value, 1))), # , "%"
+            hjust = -0.1, size = 3.5, color = "black") +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = paste0("Eighty Years After 'Fiat Panis', Millions Still Go Hungry"),
+    subtitle = "Top 20 Countries Facing Severe Food Insecurity",
+    x = "Percent of Population",
+    y = NULL,
+    caption = "Source: FAO Suite of Food Security Indicators\n Note:  Values represent 3-year averages;  Includes only countries with data in 2024"
+  ) +
+theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    panel.grid       = element_blank(),
+    panel.background = element_rect(fill = "#f7f7f7", colour = NA),
+    plot.background  = element_rect(fill = "#f7f7f7", colour = NA),
+    axis.text.y  = element_text(size = 10, face = "bold", family = "Arial",colour = "black"),
+    axis.title.y = element_text(size = 10, face = "bold", family = "Arial"),
+    axis.title.x = element_text(size = 10, face = "bold", family = "Arial"),
+    strip.text   = element_text(face = "bold", size = 13),
+    plot.title   = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle= element_text(size = 12, face = "bold", hjust = 0.5, lineheight = 1.2),
+    axis.text.x  = element_text(size = 8, face = "bold", family = "Arial", hjust = 1), 
+    plot.caption = element_text(size = 8,,hjust = 0, margin = margin(t = 8)), 
+    plot.caption.position = "plot")
+  
+
+
+
+
+ ggsave("Top_20_Countries_Severe_Food_Insecurity.png", width = 9.5, height = 7.5, dpi = 320)
+ 
+ 
+
+```
+
+
+# Key Insights
+- South Sudan leads with 63% of its population facing severe food insecurity — the world’s highest rate in 2024.
+- Sub-Saharan Africa dominates the top ranks, with four of the top five countries located in the region.
+- Eight decades after “Fiat Panis,” hunger remains widespread. Ending food insecurity is still unfinished work.
